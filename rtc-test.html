@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="description" content="WebRTCのローカルテスト">
+    <title>RTC TEST</title>
+    <link rel="icon" href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIj8+DQo8c3ZnDQogIHZlcnNpb249IjEuMSINCiAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIg0KICB2aWV3Qm94PSIwIDAgMTYgMTYiDQo+DQogIDxyZWN0DQogICAgZmlsbD0iI0NDQyINCiAgICB4PSIwIg0KICAgIHk9IjAiDQogICAgd2lkdGg9IjE2Ig0KICAgIGhlaWdodD0iMTYiDQogICAgcng9IjEiDQogICAgcnk9IjEiDQogIC8+DQo8L3N2Zz4=">
+    <style>
+
+#offer-out, #offer-in, #answer-in, #answer-out {
+  background-color: #FFF;
+  color: #333;
+  inline-size: calc(100dvmin - 10rem);
+  block-size: 2rem;
+  vertical-align: middle;
+}
+
+#copy-offer, #submit-offer {
+  background-color: #066;
+  color: #CFF;
+}
+
+#copy-answer, #submit-answer {
+  background-color: #600;
+  color: #FCC;
+}
+
+.name {
+  background-color: #000;
+  color: #FFF;
+  inline-size: 10rem;
+  block-size: 2rem;
+  line-height: 2rem;
+}
+
+#offer-button {
+  background-color: #066;
+  color: #CFF;
+}
+
+#answer-button {
+  background-color: #600;
+  color: #FCC;
+}
+
+input[type="button"] {
+  background-color: #666;
+  color: #FFF;
+  inline-size: 6rem;
+  block-size: 2rem;
+  line-height: 2rem;
+  cursor: pointer;
+}
+
+canvas {
+  image-rendering: crisp-edges;
+  inline-size: 100dvmin;
+  block-size: 100dvmin;
+  cursor: pointer;
+}
+
+span {
+  display: inline-block;
+  block-size: 2rem;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.none {
+  display: none;
+}
+
+/* 全体 */
+body {
+  background-color: #000;
+  color: #FFF;
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: hidden;
+  line-height: 1rem;
+  text-align: center;
+}
+html {
+  font-size: 16pt;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  inline-size: 100dvi;
+  block-size: 100dvb;
+  overflow: hidden;
+}
+
+/* すべて */
+* {
+  margin: 0;
+  padding: 0;
+  border-style: none;
+  font-size: 1rem;
+  font-weight: normal;
+  font-family: sans-serif;
+  line-height: 2rem;
+  vertical-align: middle;
+  word-spacing: 0.5em;
+  box-sizing: border-box;
+  outline: none;
+  touch-action: manipulation;
+}
+    </style>
+  </head>
+  <body>
+    <canvas width="256" height="256" class="none"></canvas>
+    <div id="start-div" class="">
+      <input id="offer-button" value="OFFER" type="button">
+      <input id="answer-button" value="ANSWER" type="button">
+    </div>
+    <div id="offer-div" class="none">
+      <span class="name">OFFER OUT</span><input id="offer-out" type="text">
+      <br>
+      <span class="name">ANSWER IN</span><input id="answer-in" type="text">
+      <br>
+      <input id="submit-answer" value="SUBMIT" type="button">
+    </div>
+    <div id="answer-div" class="none">
+      <span class="name">OFFER IN</span><input id="offer-in" type="text">
+      <br>
+      <input id="submit-offer" value="SUBMIT" type="button">
+      <br>
+      <span class="name">ANSWER OUT</span><input id="answer-out" type="text">
+    </div>
+    <script>'use strict';
+
+// 要素
+const canvas = document.querySelector('canvas');
+const startDiv = document.querySelector('#start-div');
+const offerButton = document.querySelector('#offer-button');
+const offerDiv = document.querySelector('#offer-div');
+const offerIn = document.querySelector('#offer-in');
+const offerOut = document.querySelector('#offer-out');
+const copyOffer = document.querySelector('#copy-offer');
+const submitOffer = document.querySelector('#submit-offer');
+const answerButton = document.querySelector('#answer-button');
+const answerDiv = document.querySelector('#answer-div');
+const answerIn = document.querySelector('#answer-in');
+const answerOut = document.querySelector('#answer-out');
+const copyAnswer = document.querySelector('#copy-answer');
+const submitAnswer = document.querySelector('#submit-answer');
+
+let role = '';
+
+offerIn.value = '';
+answerIn.value = '';
+
+// 押している場所のポインター
+const pointer = {
+  offer: {
+    x: 0,
+    y: 0,
+    downed: false,
+  },
+  answer: {
+    x: 0,
+    y: 0,
+    downed: false,
+  },
+}
+
+// 通信関係
+const pc = new RTCPeerConnection({
+  iceServers: [
+    {
+      urls: 'stun:stun.l.google.com:19302'
+    }
+  ]
+});
+let channel;
+
+// 描画コンテキスト
+const context = canvas.getContext('2d');
+context.fillStyle = '#FFF';
+context.fillRect(0, 0, canvas.width, canvas.height); // 白で塗りつぶす
+
+// アニメーションフレーム
+let prevTime = 0; // 前回フレームのタイムスタンプ
+let frameCount = 0; // 毎フレーム数える
+const animationFrame = (t) => {
+  requestAnimationFrame(animationFrame);
+  const time = t / 1000;
+  if(prevTime === 0) prevTime = time;
+  const deltaTime = time - prevTime;
+
+  // 20FPSで相手に送信
+  if(frameCount % 3) {
+    if(canvas.className === '') sendData(JSON.stringify(pointer[role]));
+  }
+
+  context.fillRect(0, 0, canvas.width, canvas.height); // 白で塗りつぶす
+
+  // 押しているなら丸描画
+  if(pointer.offer.downed) {
+    context.strokeStyle = '#099';
+    context.beginPath();
+    context.arc(pointer.offer.x * canvas.width, pointer.offer.y * canvas.height, 32, 0, Math.PI * 2);
+    context.stroke();
+  }
+
+  // 押しているなら丸描画
+  if(pointer.answer.downed) {
+    context.strokeStyle = '#900';
+    context.beginPath();
+    context.arc(pointer.answer.x * canvas.width, pointer.answer.y * canvas.height, 32, 0, Math.PI * 2);
+    context.stroke();
+  }
+
+  prevTime = time;
+  frameCount++;
+};
+requestAnimationFrame(animationFrame);
+
+
+// 相手に送信
+const sendData = (data) => {
+  if (channel.readyState === "open") {
+    channel.send(data);
+  }
+};
+
+// オファー役のボタンを押した
+offerButton.addEventListener('click', async(e) => {
+  offerDiv.className = '';
+  startDiv.className = 'none';
+  role = 'offer';
+  channel = pc.createDataChannel('game');
+  
+  // 相手に接続できた
+  channel.addEventListener('open', (e) => {
+    offerDiv.className = 'none';
+    canvas.className = '';
+  });
+
+  // 相手から受信
+  channel.addEventListener('message', (e) => {
+    pointer.answer = JSON.parse(e.data);
+  });
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // ICE候補の収集完了を待つ
+  await new Promise((resolve) => {
+    if (pc.iceGatheringState === "complete") {
+      resolve();
+    } else {
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === "complete") {
+          resolve();
+        }
+      };
+    }
+  });
+
+  // これをコピーしてアンサー側に渡す
+  offerOut.value = JSON.stringify(pc.localDescription);
+});
+
+
+// アンサー役のボタンを押した
+answerButton.addEventListener('click', async(e) => {
+  answerDiv.className = '';
+  startDiv.className = 'none';
+  role = 'answer';
+
+  pc.addEventListener('datachannel', (e) => {
+    channel = e.channel;
+
+    // 接続した
+    channel.addEventListener('open', (e) => {
+      answerDiv.className = 'none';
+      canvas.className = '';
+    });
+
+    // メッセージを受け取った
+    channel.addEventListener('message', (e) => {
+      pointer.offer = JSON.parse(e.data);
+    });
+  });
+});
+
+// オファーをコピー
+offerOut.addEventListener('click', () => {
+  offerOut.focus();
+  offerOut.select();
+});
+
+// アンサーをコピー
+answerOut.addEventListener('click', () => {
+  answerOut.focus();
+  answerOut.select();
+});
+
+
+
+// オファーを受け取って貼る
+submitOffer.addEventListener('click', async(e) => {
+  // コピーしたOfferを貼り付ける
+  const offer = JSON.parse(offerIn.value);
+  await pc.setRemoteDescription(offer);
+  
+  // Answerを作成
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  // ICE候補の収集完了を待つ
+  await new Promise(resolve => {
+    if (pc.iceGatheringState === "complete") {
+      resolve();
+    } else {
+      pc.addEventListener('icegatheringstatechange', () => {
+        if (pc.iceGatheringState === "complete") {
+          resolve();
+        }
+      });
+    }
+  });
+
+  // これをコピーしてオファー側に渡す
+  answerOut.value = JSON.stringify(pc.localDescription);
+});
+
+// アンサーを受け取って貼る
+submitAnswer.addEventListener('click', async(e) => {
+  const answer = JSON.parse(answerIn.value);
+  await pc.setRemoteDescription(answer);
+});
+
+// キャンバス押した
+canvas.addEventListener('pointerdown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer[role].x = (e.clientX - rect.left) / rect.width;
+  pointer[role].y = (e.clientY - rect.top) / rect.height;
+  pointer[role].downed = true;
+});
+
+// キャンバス動かした
+canvas.addEventListener('pointermove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer[role].x = (e.clientX - rect.left) / rect.width;
+  pointer[role].y = (e.clientY - rect.top) / rect.height;
+});
+
+// キャンバス離した
+canvas.addEventListener('pointerup', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer[role].x = (e.clientX - rect.left) / rect.width;
+  pointer[role].y = (e.clientY - rect.top) / rect.height;
+  pointer[role].downed = false;
+});
+
+// キャンバスの外に出た
+canvas.addEventListener('pointerleave', (e) => {
+  pointer[role].downed = false;
+});
+
+    </script>
+  </body>
+</html>
